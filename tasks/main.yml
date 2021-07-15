@@ -1,0 +1,103 @@
+---
+- name: Install packages
+  community.general.pacman:
+    name:
+      - mariadb
+      - galera
+      - rsync
+- name: Stop mariadb
+  ansible.builtin.systemd:
+    name: mariadb
+    state: stopped
+  when: reset
+- name: Get root uuid
+  ansible.builtin.set_fact: 
+    root_uuid: "{{ (ansible_facts.mounts | selectattr('mount','in','/') | list | map(attribute='uuid')) | list | join(' ') }}"
+- name: Create btrfs-top-lvl dir
+  ansible.builtin.file:
+    name: /root/btrfs-top-lvl
+    state: directory
+  when: btrfs
+- name: Mount btrfs-top-lvl
+  ansible.posix.mount:
+    src: "UUID={{ root_uuid }}"
+    path: /root/btrfs-top-lvl
+    fstype: btrfs
+    opts: rw,relatime,space_cache
+    state: mounted
+  when: btrfs
+- name: Unmount mysql subvol
+  ansible.posix.mount:
+    src: "UUID={{ root_uuid }}"
+    path: /var/lib/mysql
+    fstype: btrfs
+    opts: rw,relatime,space_cache,subvol=mysql,nodatacow,compression=no
+    state: unmounted
+  when: btrfs and reset
+- name: Delete mysql subvol
+  ansible.builtin.shell:
+    chdir: /root/btrfs-top-lvl
+    cmd: btrfs subvolume delete mysql
+    removes: /root/btrfs-top-lvl/mysql
+  when: btrfs and reset
+- name: Delete /var/lib/mysql
+  ansible.builtin.file:
+    path: /var/lib/mysql/
+    state: absent
+  when: reset
+- name: Create mysql subvol
+  ansible.builtin.shell:
+    chdir: /root/btrfs-top-lvl
+    cmd: btrfs subvolume create mysql
+    creates: /root/btrfs-top-lvl/mysql
+  when: btrfs
+- name: Create /var/lib/mysql
+  ansible.builtin.file:
+    name: /var/lib/mysql
+    state: directory
+    mode: 0700
+    owner: mysql
+    group: mysql
+- name: Mount mysql subvol
+  ansible.posix.mount:
+    src: "UUID={{ root_uuid }}"
+    path: /var/lib/mysql
+    fstype: btrfs
+    opts: rw,relatime,space_cache,subvol=mysql,nodatacow,compression=no
+    state: mounted
+  when: btrfs
+- name: Include mariadb_conf
+  ansible.builtin.include_vars:
+    file: mariadb_conf.yml
+- name: Init mysql
+  ansible.builtin.shell:
+    cmd: mariadb-install-db --user=mysql --basedir=/usr --datadir=/var/lib/mysql
+    creates: /var/lib/mysql/mysql
+- name: Create config file
+  community.general.ini_file:
+    path: /etc/my.cnf.d/ansible.cnf
+    create: yes
+    mode: 0644
+    section: "{{ item.section }}"
+    option: "{{ item.key }}"
+    value: "{{ item.value }}"
+  loop: "{{ mariadb_conf | ini_dict_flatten }}"
+  notify: restart mariadb
+- name: Copy keytab
+  ansible.builtin.copy:
+    src: "mariadb-{{ ansible_hostname }}.keytab"
+    dest: /etc/my.cnf.d/mariadb.keytab
+    mode: 0640
+    owner: root
+    group: mysql
+  notify: restart mariadb
+- name: Bootstrap galera
+  ansible.builtin.shell:
+    cmd: galera_new_cluster
+    creates: /var/lib/mysql/grastate.dat
+  when: galera_bootstrap|default(false)|bool == true
+- name: Enable mariadb
+  ansible.builtin.systemd:
+    name: mariadb.service
+    enabled: yes
+...

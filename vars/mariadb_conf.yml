@@ -1,0 +1,18 @@
+---
+mariadb_conf:
+  mariadb:
+    plugin_load_add: auth_gssapi
+    gssapi_keytab_path: /etc/my.cnf.d/mariadb.keytab
+    gssapi_principal_name: "mariadb/{{ ansible_fqdn }}@{{ gssapi_domain }}"
+  mysql:
+    auto-rehash: "1"
+  galera:
+    wsrep_on: "ON"
+    wsrep_cluster_address: "gcomm://{{ groups['galera'] | map('extract', hostvars, ['ansible_fqdn']) | join(',') }}"
+    wsrep_cluster_name: "{{ wsrep_cluster_name }}"
+    wsrep_provider: "/usr/lib/galera/libgalera_smm.so"
+    default_storage_engine: InnoDB
+    bind-address: 0.0.0.0
+    innodb_autoinc_lock_mode: 2
+    binlog_format: row
+...
