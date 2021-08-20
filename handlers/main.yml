@@ -3,4 +3,5 @@
   ansible.builtin.systemd:
     name: mariadb.service
     state: restarted
+  throttle: 1
 ...
