@@ -1,0 +1,7 @@
+---
+mariadb_conf_gssapi:
+  mariadb:
+    plugin_load_add: auth_gssapi
+    gssapi_keytab_path: /etc/my.cnf.d/mariadb.keytab
+    gssapi_principal_name: "mariadb/{{ ansible_fqdn }}@{{ gssapi_domain }}"
+...

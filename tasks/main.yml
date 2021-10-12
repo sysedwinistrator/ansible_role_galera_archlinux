@@ -15,9 +15,9 @@
     root_uuid: "{{ (ansible_facts.mounts | selectattr('mount','in','/') | list | map(attribute='uuid')) | list | join(' ') }}"
 - name: Create btrfs-top-lvl dir
   ansible.builtin.file:
-    name: /root/btrfs-top-lvl
+    name: "{{ btrfs_top_lvl_mnt }}"
     state: directory
-  when: btrfs
+  when: btrfs_top_lvl_mnt|length > 0
 - name: Mount btrfs-top-lvl
   ansible.posix.mount:
     src: "UUID={{ root_uuid }}"
@@ -25,7 +25,7 @@
     fstype: btrfs
     opts: rw,relatime,space_cache
     state: mounted
-  when: btrfs
+  when: btrfs_top_lvl_mnt|length > 0
 - name: Unmount mysql subvol
   ansible.posix.mount:
     src: "UUID={{ root_uuid }}"
@@ -33,13 +33,13 @@
     fstype: btrfs
     opts: rw,relatime,space_cache,subvol=mysql,nodatacow,compression=no
     state: unmounted
-  when: btrfs and reset
+  when: btrfs_top_lvl_mnt|length > 0 and reset
 - name: Delete mysql subvol
   ansible.builtin.shell:
     chdir: /root/btrfs-top-lvl
     cmd: btrfs subvolume delete mysql
     removes: /root/btrfs-top-lvl/mysql
-  when: btrfs and reset
+  when: btrfs_top_lvl_mnt|length > 0 and reset
 - name: Delete /var/lib/mysql
   ansible.builtin.file:
     path: /var/lib/mysql/
@@ -50,7 +50,7 @@
     chdir: /root/btrfs-top-lvl
     cmd: btrfs subvolume create mysql
     creates: /root/btrfs-top-lvl/mysql
-  when: btrfs
+  when: btrfs_top_lvl_mnt|length > 0
 - name: Create /var/lib/mysql
   ansible.builtin.file:
     name: /var/lib/mysql
@@ -65,10 +65,13 @@
     fstype: btrfs
     opts: rw,relatime,space_cache,subvol=mysql,nodatacow,compression=no
     state: mounted
-  when: btrfs
+  when: btrfs_top_lvl_mnt|length > 0
 - name: Include mariadb_conf
   ansible.builtin.include_vars:
     file: mariadb_conf.yml
+- name: Include mariadb_conf_gssapi
+  ansible.builtin.include_vars:
+    file: mariadb_conf_gssapi.yml
 - name: Init mysql
   ansible.builtin.shell:
     cmd: mariadb-install-db --user=mysql --basedir=/usr --datadir=/var/lib/mysql
@@ -83,6 +86,17 @@
     value: "{{ item.value }}"
   loop: "{{ mariadb_conf | ini_dict_flatten }}"
   notify: restart mariadb
+- name: Create config file (GSSAPI)
+  community.general.ini_file:
+    path: /etc/my.cnf.d/ansible.cnf
+    create: yes
+    mode: 0644
+    section: "{{ item.section }}"
+    option: "{{ item.key }}"
+    value: "{{ item.value }}"
+  loop: "{{ mariadb_conf_gssapi| ini_dict_flatten }}"
+  notify: restart mariadb
+  when: gssapi_domain|length > 0
 - name: Copy keytab
   ansible.builtin.copy:
     src: "mariadb-{{ ansible_hostname }}.keytab"
@@ -91,11 +105,12 @@
     owner: root
     group: mysql
   notify: restart mariadb
+  when: gssapi_domain|length > 0
 - name: Bootstrap galera
   ansible.builtin.shell:
     cmd: galera_new_cluster
     creates: /var/lib/mysql/grastate.dat
-  when: galera_bootstrap|default(false)|bool == true
+  run_once: true
 - name: Enable mariadb
   ansible.builtin.systemd:
     name: mariadb.service
