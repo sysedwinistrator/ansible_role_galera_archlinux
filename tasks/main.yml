@@ -5,6 +5,7 @@
       - mariadb
       - galera
       - rsync
+      - lsof
 - name: Stop mariadb
   ansible.builtin.systemd:
     name: mariadb
