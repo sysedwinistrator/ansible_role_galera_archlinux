@@ -111,8 +111,9 @@
     cmd: galera_new_cluster
     creates: /var/lib/mysql/grastate.dat
   run_once: true
-- name: Enable mariadb
+- name: Start and enable mariadb
   ansible.builtin.systemd:
     name: mariadb.service
     enabled: yes
+    state: started
 ...
